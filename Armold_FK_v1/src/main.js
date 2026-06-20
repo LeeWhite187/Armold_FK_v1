@@ -8,6 +8,7 @@ import './style.css';
 
 const canvas = document.getElementById('scene');
 const panel = document.getElementById('panel');
+const jogPanel = document.getElementById('jogpanel');
 const hud = document.getElementById('hud');
 
 const { renderer, scene, camera, controls, resize } = createScene(canvas);
@@ -25,7 +26,7 @@ const partsLayout = parts.snapshot();
 const sequencer = new Sequencer(robot);
 
 // UI / control panel
-const ui = new UI({ panel, hud, robot, sequencer, parts, partsLayout });
+const ui = new UI({ panel, jogPanel, hud, robot, sequencer, parts, partsLayout });
 
 // The panel can change size (responsive); keep the canvas in sync.
 const ro = new ResizeObserver(() => resize());

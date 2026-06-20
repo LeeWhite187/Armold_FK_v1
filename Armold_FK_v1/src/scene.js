@@ -14,6 +14,9 @@ export function createScene(canvas) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x1b2733);
 
+  // Orbit pivot stays on the robot's vertical axis (the base). The robot is
+  // visually centered in the open area left of the floating panels via a
+  // horizontal lens shift (camera.setViewOffset) computed in resize().
   const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
   camera.position.set(4.5, 3.8, 5.5);
 
@@ -72,6 +75,20 @@ export function createScene(canvas) {
     const h = parent.clientHeight;
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
+
+    // Horizontal lens shift: center the orbit target (robot base) within the
+    // open area between the window's left edge and the left edge of the
+    // right-hand control column (the main panel). setViewOffset with
+    // width == fullWidth keeps the zoom unchanged and only skews the frustum
+    // sideways, so the robot shifts left without distortion.
+    const panel = document.getElementById('panel');
+    const panelLeft = panel ? panel.getBoundingClientRect().left : w;
+    if (w > 760 && panelLeft > 0 && panelLeft < w) {
+      const offsetX = (w - panelLeft) / 2; // push content left by half the panel band
+      camera.setViewOffset(w, h, offsetX, 0, w, h);
+    } else {
+      camera.clearViewOffset();
+    }
     camera.updateProjectionMatrix();
   }
   resize();

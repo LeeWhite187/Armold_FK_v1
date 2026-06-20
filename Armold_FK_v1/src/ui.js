@@ -2,7 +2,11 @@ import { JOINTS, DEG } from './robot.js';
 import { makeStep } from './sequencer.js';
 
 /**
- * Builds the control panel DOM and wires it to the robot + sequencer.
+ * Builds the control panels and wires them to the robot + sequencer.
+ *
+ * The controls live in two columns to fit short (1366x768) screens:
+ *   - jogPanel: live joint jog sliders + gripper (forward kinematics)
+ *   - panel:    Program (step sequence), Playback, File
  *
  * Two-way binding:
  *  - dragging a jog slider drives the robot directly (live forward kinematics)
@@ -11,10 +15,12 @@ import { makeStep } from './sequencer.js';
  */
 
 const LS_KEY = 'armold.sequence.v1';
+const GRIP_DISPLAY_THRESHOLD = 0.5; // >= this shows a closed hand in the step list
 
 export class UI {
-  constructor({ panel, hud, robot, sequencer, parts, partsLayout }) {
+  constructor({ panel, jogPanel, hud, robot, sequencer, parts, partsLayout }) {
     this.panel = panel;
+    this.jogPanel = jogPanel;
     this.hud = hud;
     this.robot = robot;
     this.seq = sequencer;
@@ -31,12 +37,8 @@ export class UI {
   }
 
   _build() {
-    this.panel.innerHTML = `
-      <header class="brand">
-        <h1>Armold</h1>
-        <span class="sub">FK Arm Simulator</span>
-      </header>
-
+    // --- Jog column ----------------------------------------------------
+    this.jogPanel.innerHTML = `
       <section class="card">
         <h2>Jog Joints</h2>
         <div id="jog"></div>
@@ -49,7 +51,10 @@ export class UI {
           <button id="home">Home Pose</button>
         </div>
       </section>
+    `;
 
+    // --- Main panel ----------------------------------------------------
+    this.panel.innerHTML = `
       <section class="card">
         <h2>Program</h2>
         <ol id="steps" class="steps"></ol>
@@ -67,7 +72,6 @@ export class UI {
           <label>Name <input id="s-name" type="text" /></label>
           <label>Duration (s) <input id="s-dur" type="number" min="0.1" step="0.1" /></label>
           <label>Dwell (s) <input id="s-dwell" type="number" min="0" step="0.1" /></label>
-          <label class="chk"><input id="s-grip" type="checkbox" /> Close gripper</label>
         </div>
       </section>
 
@@ -101,12 +105,12 @@ export class UI {
     `;
 
     // --- Jog sliders ---------------------------------------------------
-    const jog = this.panel.querySelector('#jog');
+    const jog = this.jogPanel.querySelector('#jog');
     JOINTS.forEach((j, i) => {
       const row = document.createElement('div');
       row.className = 'jog-row';
       row.innerHTML = `
-        <label>${j.name}</label>
+        <label title="${j.name}">${j.name}</label>
         <input type="range" min="${j.min}" max="${j.max}" step="0.5" value="${j.home}" />
         <span class="val">${j.home}&deg;</span>
       `;
@@ -124,17 +128,19 @@ export class UI {
     });
 
     // --- Gripper slider ------------------------------------------------
-    this._grip = this.panel.querySelector('#grip');
-    this._gripVal = this.panel.querySelector('#grip-val');
+    this._grip = this.jogPanel.querySelector('#grip');
+    this._gripVal = this.jogPanel.querySelector('#grip-val');
     this._grip.addEventListener('input', () => {
       const v = parseFloat(this._grip.value);
       this.robot.setGripper(v);
-      this._gripVal.textContent = v > 0.5 ? 'closed' : 'open';
+      this._gripVal.textContent = v >= GRIP_DISPLAY_THRESHOLD ? 'closed' : 'open';
     });
 
     // --- Buttons -------------------------------------------------------
+    const inJog = (id) => this.jogPanel.querySelector(id);
     const $ = (id) => this.panel.querySelector(id);
-    $('#home').onclick = () => { this.robot.home(); this.seq.pause(); this.syncFromRobot(true); };
+
+    inJog('#home').onclick = () => { this.robot.home(); this.seq.pause(); this.syncFromRobot(true); };
 
     $('#add').onclick = () => this._addStep();
     $('#update').onclick = () => this._updateStep();
@@ -161,8 +167,7 @@ export class UI {
     this._eName = $('#s-name');
     this._eDur = $('#s-dur');
     this._eDwell = $('#s-dwell');
-    this._eGrip = $('#s-grip');
-    for (const el of [this._eName, this._eDur, this._eDwell, this._eGrip]) {
+    for (const el of [this._eName, this._eDur, this._eDwell]) {
       el.addEventListener('change', () => this._applyEditor());
     }
   }
@@ -176,7 +181,7 @@ export class UI {
       this._readouts[i].textContent = `${deg[i].toFixed(0)}°`;
     }
     this._grip.value = this.robot.gripper.toFixed(2);
-    this._gripVal.textContent = this.robot.gripper > 0.5 ? 'closed' : 'open';
+    this._gripVal.textContent = this.robot.gripper >= GRIP_DISPLAY_THRESHOLD ? 'closed' : 'open';
   }
 
   // ---- Step list ------------------------------------------------------
@@ -184,13 +189,14 @@ export class UI {
     const list = this.panel.querySelector('#steps');
     list.innerHTML = '';
     this.seq.steps.forEach((step, i) => {
+      const closed = step.gripper >= GRIP_DISPLAY_THRESHOLD;
       const li = document.createElement('li');
       li.className = 'step' +
         (i === this.selected ? ' selected' : '') +
         (i === this.seq.index && this.seq.playing ? ' active' : '');
       li.innerHTML = `
         <span class="step-name">${i + 1}. ${escapeHtml(step.name)}</span>
-        <span class="step-meta">${step.gripper > 0.5 ? '✊' : '✋'} ${step.duration}s</span>
+        <span class="step-meta">${closed ? '✊' : '✋'} ${step.duration}s</span>
       `;
       li.onclick = () => this._select(i);
       list.appendChild(li);
@@ -208,7 +214,6 @@ export class UI {
     this._eName.value = step.name;
     this._eDur.value = step.duration;
     this._eDwell.value = step.dwell;
-    this._eGrip.checked = step.gripper > 0.5;
   }
 
   _updateButtons() {
@@ -232,7 +237,6 @@ export class UI {
     if (!step) return;
     step.angles = this.robot.getAnglesDeg().map((d) => Math.round(d * 10) / 10);
     step.gripper = this.robot.gripper;
-    this._eGrip.checked = step.gripper > 0.5;
     this.refreshSteps();
     this._select(this.selected);
   }
@@ -272,7 +276,6 @@ export class UI {
     step.name = this._eName.value || 'Step';
     step.duration = Math.max(0.1, parseFloat(this._eDur.value) || 1);
     step.dwell = Math.max(0, parseFloat(this._eDwell.value) || 0);
-    step.gripper = this._eGrip.checked ? 1 : 0;
     this.refreshSteps();
   }
 
